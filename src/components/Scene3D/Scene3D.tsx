@@ -327,8 +327,11 @@ function Tank({ onFire, tankRef }: { onFire: (position: THREE.Vector3, direction
   const { scene } = useGLTF(tankModel)
   const { keys, keyJustPressedRef } = useKeyboardControls()
   const moveSpeed = 0.03 // 降低移动速度，更真实
+  const rotationSpeed = 1.5 // 旋转速度（弧度/秒）
   const velocity = useRef(new THREE.Vector3())
   const targetVelocity = useRef(new THREE.Vector3())
+  const targetRotation = useRef(0) // 目标旋转角度
+  const currentRotation = useRef(0) // 当前旋转角度
   const acceleration = 0.1 // 降低加速度，启动更慢
   const deceleration = 0.15 // 降低减速度，停止更慢
   const lastFireTime = useRef(0)
@@ -415,38 +418,45 @@ function Tank({ onFire, tankRef }: { onFire: (position: THREE.Vector3, direction
       keyJustPressedRef.current['space'] = false
     }
 
-    // 计算目标速度（在本地坐标系中）
-    const localTargetVelocity = new THREE.Vector3()
-    
-    // 处理WASD和方向键
-    // W/↑ - 前进（沿炮管方向）
-    if (keys['w'] || keys['arrowup']) {
-      localTargetVelocity.z -= moveSpeed
-    }
-    // S/↓ - 后退
-    if (keys['s'] || keys['arrowdown']) {
-      localTargetVelocity.z += moveSpeed
-    }
-    // A/← - 左移
+    // 处理旋转（A/D 或 左/右方向键）
+    // A/← - 左转（逆时针）
     if (keys['a'] || keys['arrowleft']) {
-      localTargetVelocity.x -= moveSpeed
+      targetRotation.current += rotationSpeed * delta
     }
-    // D/→ - 右移
+    // D/→ - 右转（顺时针）
     if (keys['d'] || keys['arrowright']) {
-      localTargetVelocity.x += moveSpeed
+      targetRotation.current -= rotationSpeed * delta
     }
 
-    // 将本地速度转换为世界速度
+    // 平滑旋转到目标角度
+    const rotationDiff = targetRotation.current - currentRotation.current
+    // 处理角度环绕（-π 到 π）
+    let normalizedDiff = rotationDiff
+    if (normalizedDiff > Math.PI) normalizedDiff -= Math.PI * 2
+    if (normalizedDiff < -Math.PI) normalizedDiff += Math.PI * 2
+    
+    // 平滑插值旋转
+    currentRotation.current += normalizedDiff * 0.15 // 旋转平滑系数
+    
+    // 应用旋转到坦克
+    tankRef.current.rotation.y = currentRotation.current
+
+    // 处理前进/后退（W/S 或 上/下方向键）
+    // 计算炮口方向（坦克的前方）
     const forward = new THREE.Vector3(0, 0, 1)
     forward.applyQuaternion(tankRef.current.quaternion)
     
-    const right = new THREE.Vector3(1, 0, 0)
-    right.applyQuaternion(tankRef.current.quaternion)
-
-    // 计算世界坐标系中的目标速度
+    // 计算目标速度
     targetVelocity.current.set(0, 0, 0)
-    targetVelocity.current.addScaledVector(forward, -localTargetVelocity.z)
-    targetVelocity.current.addScaledVector(right, -localTargetVelocity.x)
+    
+    // W/↑ - 前进（沿炮管方向）
+    if (keys['w'] || keys['arrowup']) {
+      targetVelocity.current.addScaledVector(forward, moveSpeed)
+    }
+    // S/↓ - 后退（沿炮管反方向）
+    if (keys['s'] || keys['arrowdown']) {
+      targetVelocity.current.addScaledVector(forward, -moveSpeed)
+    }
 
     // 平滑插值当前速度到目标速度
     const targetSpeed = targetVelocity.current.length()
