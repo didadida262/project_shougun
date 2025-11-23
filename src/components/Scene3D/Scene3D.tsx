@@ -1,4 +1,4 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 import { useRef, useMemo, useEffect, useState } from 'react'
@@ -323,9 +323,8 @@ function MuzzleFlash({ position, onComplete }: MuzzleFlashProps) {
 }
 
 // 坦克模型组件
-function Tank({ onFire }: { onFire: (position: THREE.Vector3, direction: THREE.Vector3) => void }) {
+function Tank({ onFire, tankRef }: { onFire: (position: THREE.Vector3, direction: THREE.Vector3) => void; tankRef: React.RefObject<THREE.Group> }) {
   const { scene } = useGLTF(tankModel)
-  const tankRef = useRef<THREE.Group>(null)
   const { keys, keyJustPressedRef } = useKeyboardControls()
   const moveSpeed = 0.03 // 降低移动速度，更真实
   const velocity = useRef(new THREE.Vector3())
@@ -480,11 +479,49 @@ function Tank({ onFire }: { onFire: (position: THREE.Vector3, direction: THREE.V
   )
 }
 
+// 相机跟随组件
+function CameraFollow({ tankRef }: { tankRef: React.RefObject<THREE.Group> }) {
+  const controlsRef = useRef<any>(null)
+  const { camera } = useThree()
+
+  useFrame(() => {
+    if (!tankRef.current || !controlsRef.current) return
+
+    // 获取坦克位置
+    const tankPosition = tankRef.current.position.clone()
+    
+    // 计算炮口方向（坦克的前方）
+    const forward = new THREE.Vector3(0, 0, 1)
+    forward.applyQuaternion(tankRef.current.quaternion)
+    
+    // 更新OrbitControls的目标为坦克位置
+    controlsRef.current.target.lerp(tankPosition, 0.1)
+    
+    // 计算相机应该看向的方向（炮口方向）
+    const lookDirection = forward.clone().normalize()
+    const lookAtPosition = tankPosition.clone().add(lookDirection.multiplyScalar(2))
+    
+    // 平滑地让相机朝向炮口方向
+    const currentLookAt = new THREE.Vector3()
+    camera.getWorldDirection(currentLookAt)
+    currentLookAt.multiplyScalar(2).add(camera.position)
+    
+    const targetLookAt = lookAtPosition
+    const smoothedLookAt = currentLookAt.lerp(targetLookAt, 0.05)
+    
+    // 更新相机朝向
+    camera.lookAt(smoothedLookAt)
+  })
+
+  return <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.05} minDistance={1} maxDistance={2} minPolarAngle={0} maxPolarAngle={Math.PI / 2} zoomSpeed={0.5} />
+}
+
 // 主场景组件
 export default function Scene3D() {
   const [projectiles, setProjectiles] = useState<Array<{ id: number; position: THREE.Vector3; direction: THREE.Vector3 }>>([])
   const [muzzleFlashes, setMuzzleFlashes] = useState<Array<{ id: number; position: THREE.Vector3; direction: THREE.Vector3 }>>([])
   const projectileIdRef = useRef(0)
+  const tankRef = useRef<THREE.Group>(null)
 
   const handleFire = (position: THREE.Vector3, direction: THREE.Vector3) => {
     const id = projectileIdRef.current++
@@ -519,17 +556,8 @@ export default function Scene3D() {
           state.camera.lookAt(0, 0, 0)
         }}
       >
-        {/* 鼠标控制 - 支持拖拽旋转、滚轮缩放 */}
-        <OrbitControls
-          enableDamping
-          dampingFactor={0.05}
-          minDistance={1}
-          maxDistance={10}
-          minPolarAngle={0}
-          maxPolarAngle={Math.PI / 2}
-          zoomSpeed={0.5}
-          target={[0, 0, 0]}
-        />
+        {/* 相机跟随坦克炮口方向 */}
+        <CameraFollow tankRef={tankRef} />
 
         {/* 环境光 - 增强基础照明 */}
         <ambientLight intensity={0.6} />
@@ -578,7 +606,7 @@ export default function Scene3D() {
         <GridGround />
 
         {/* 坦克模型 */}
-        <Tank onFire={handleFire} />
+        <Tank onFire={handleFire} tankRef={tankRef} />
 
         {/* 炮弹 */}
         {projectiles.map((proj) => (
